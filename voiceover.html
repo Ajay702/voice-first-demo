@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice Studio</title>
+<style>
+  :root {
+    --bg: #0e1116; --surface: #171b22; --text: #eef1f5; --muted: #8b95a5; --border: #262c36;
+    --accent: #3b82f6; --rec: #ef4444; --ok: #22c55e; --warn: #f59e0b;
+    font-family: system-ui, -apple-system, sans-serif; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { margin: 0; font-size: 22px; }
+  .lead { color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button.active { background: #1d2a44; border-color: var(--accent); }
+  .status { color: var(--muted); font-size: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+  .screen { font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px; }
+  .now { font-size: 26px; line-height: 1.55; margin: 0; min-height: 6em; }
+  .count { font-size: 96px; font-weight: 700; text-align: center; }
+  .timing { display: flex; align-items: center; gap: 12px; margin-top: 16px; font-size: 14px; color: var(--muted); }
+  .timing b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 18px; }
+  .track { position: relative; flex: 1; height: 10px; background: #10141b; border-radius: 99px; overflow: hidden; }
+  .track .ok { position: absolute; top: 0; bottom: 0; background: rgba(34,197,94,.18); }
+  .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); border-radius: 99px; }
+  .track.inrange i { background: var(--ok); }
+  .track.over i { background: var(--warn); }
+  .next { margin-top: 16px; font-size: 15px; line-height: 1.5; color: var(--muted); border-top: 1px solid var(--border); padding-top: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  button { font: inherit; padding: 10px 18px; border-radius: 10px; border: 1px solid var(--border); background: #222834; color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); }
+  button.rec { background: var(--rec); border-color: var(--rec); }
+  button.big { padding: 14px 26px; font-size: 18px; }
+  button:disabled { opacity: .45; cursor: default; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; color: var(--muted); }
+  .meter { width: 120px; height: 8px; background: #10141b; border-radius: 99px; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--ok); }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .hidden { display: none !important; }
+  audio { width: 100%; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Voice Studio</h1>
+    <div class="tabs">
+      <button id="tab-part1" class="active">Part 1 · Client pitch</button>
+      <button id="tab-part2">Part 2 · Tech review</button>
+    </div>
+    <span class="status" id="saved-status"></span>
+  </header>
+  <p class="lead">
+    Record your narration first; the screen video is then built around your timing. Read each
+    section at your own pace and press <kbd>Space</kbd> (or <b>Next section</b>) when you move on.
+    The suggested times are only a guide: anywhere in the green zone is fine.
+  </p>
+
+  <section class="card" id="prompter">
+    <div class="screen" id="screen"></div>
+    <p class="now" id="now"></p>
+    <div class="count hidden" id="count"></div>
+    <div class="timing" id="timing">
+      <span>This section <b id="elapsed">0:00</b></span>
+      <div class="track" id="track"><div class="ok" id="okzone"></div><i id="fill"></i></div>
+      <span>aim <b id="aim">0:00</b></span>
+    </div>
+    <div class="next" id="next"></div>
+    <div class="row">
+      <button class="rec big" id="rec">● Start recording</button>
+      <button class="primary big hidden" id="advance">Next section →</button>
+      <button class="hidden" id="restart">↺ Restart this part</button>
+      <div class="meter" title="Mic level"><i id="level"></i></div>
+      <span class="status" id="rec-status"></span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="result" style="margin-top:16px">
+    <div class="screen">Your take</div>
+    <audio id="playback" controls></audio>
+    <table>
+      <thead><tr><th>Section</th><th>You took</th><th>Suggested</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="status" style="margin-top:12px">Saved. Record the other part, then run <code>npm run record</code>. Not happy? Press Start recording to redo this part.</p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// Natural reading pace; the green zone runs from 70% to 150% of it.
+const WPM = 140
+const LOW = 0.7
+const HIGH = 1.5
+let script = {}
+let part = 'part1'
+let sections = []
+let mic = null
+let take = null // { recorder, chunks, t0, starts, i }
+
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+const aimFor = (text) => Math.max(8, (text.split(/\s+/).length / WPM) * 60)
+
+function showSection(i) {
+  const s = sections[i]
+  $('screen').textContent = `Section ${i + 1} of ${sections.length} · On screen: ${s.screen}`
+  $('now').textContent = s.text
+  const aim = aimFor(s.text)
+  $('aim').textContent = `${fmt(aim * LOW)}–${fmt(aim * HIGH)}`
+  const scale = aim * HIGH * 1.15
+  $('okzone').style.left = (aim * LOW / scale) * 100 + '%'
+  $('okzone').style.width = ((aim * HIGH - aim * LOW) / scale) * 100 + '%'
+  const n = sections[i + 1]
+  $('next').textContent = n ? `Next · ${n.screen}: ${n.text.slice(0, 160)}…` : 'Last section: press Finish when you are done.'
+  $('advance').textContent = n ? 'Next section →' : 'Finish ✓'
+}
+
+function tick() {
+  if (take) {
+    const i = take.i
+    const secs = (performance.now() - take.t0) / 1000 - take.starts[i]
+    const aim = aimFor(sections[i].text)
+    $('elapsed').textContent = fmt(secs)
+    $('fill').style.width = Math.min(100, (secs / (aim * HIGH * 1.15)) * 100) + '%'
+    $('track').className = 'track' + (secs > aim * HIGH ? ' over' : secs >= aim * LOW ? ' inrange' : '')
+  }
+  requestAnimationFrame(tick)
+}
+
+async function load(name) {
+  part = name
+  for (const p of ['part1', 'part2']) $('tab-' + p).classList.toggle('active', p === name)
+  sections = script[name]
+  showSection(0)
+  $('elapsed').textContent = '0:00'
+  $('fill').style.width = 0
+  $('result').classList.add('hidden')
+  $('rec').textContent = '● Start recording'
+  $('rec-status').textContent = ''
+  const res = await fetch(`/voice/${name}.marks.json`, { cache: 'no-store' })
+  if (res.ok) showResult(await res.json(), `/voice/${name}.webm?${Date.now()}`)
+  updateSaved()
+}
+
+async function updateSaved() {
+  const have = []
+  for (const p of ['part1', 'part2']) {
+    if ((await fetch(`/voice/${p}.marks.json`, { cache: 'no-store' })).ok) have.push(p === 'part1' ? 'Part 1' : 'Part 2')
+  }
+  $('saved-status').textContent = have.length ? `Saved: ${have.join(', ')}` : ''
+}
+
+async function getMic() {
+  if (mic) return mic
+  mic = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
+  })
+  const ctx = new AudioContext()
+  const analyser = ctx.createAnalyser()
+  ctx.createMediaStreamSource(mic).connect(analyser)
+  const buf = new Uint8Array(analyser.fftSize)
+  ;(function meter() {
+    analyser.getByteTimeDomainData(buf)
+    let peak = 0
+    for (const v of buf) peak = Math.max(peak, Math.abs(v - 128))
+    $('level').style.width = Math.min(100, (peak / 128) * 140) + '%'
+    requestAnimationFrame(meter)
+  })()
+  return mic
+}
+
+function lockTabs(locked) {
+  for (const p of ['part1', 'part2']) $('tab-' + p).disabled = locked
+}
+
+async function start() {
+  try {
+    await getMic()
+  } catch (e) {
+    alert('Microphone not available: ' + e.message + '\nCheck System Settings ▸ Privacy & Security ▸ Microphone for Brave.')
+    return
+  }
+  $('result').classList.add('hidden')
+  $('rec').classList.add('hidden')
+  lockTabs(true)
+  showSection(0)
+  $('now').classList.add('hidden')
+  $('count').classList.remove('hidden')
+  for (let s = 3; s > 0; s--) {
+    $('count').textContent = s
+    await sleep(1000)
+  }
+  $('count').classList.add('hidden')
+  $('now').classList.remove('hidden')
+  const chunks = []
+  const recorder = new MediaRecorder(mic, { mimeType: 'audio/webm;codecs=opus' })
+  recorder.ondataavailable = (e) => chunks.push(e.data)
+  recorder.start()
+  take = { recorder, chunks, t0: performance.now(), starts: [0], i: 0 }
+  $('advance').classList.remove('hidden')
+  $('restart').classList.remove('hidden')
+  $('rec-status').textContent = 'Recording…'
+}
+
+async function advance() {
+  if (!take) return
+  const now = (performance.now() - take.t0) / 1000
+  if (now - take.starts[take.i] < 1) return // ignore accidental double presses
+  if (take.i + 1 < sections.length) {
+    take.i += 1
+    take.starts.push(+now.toFixed(2))
+    showSection(take.i)
+    return
+  }
+  await finish(now)
+}
+
+async function stopTake() {
+  const t = take
+  take = null
+  const stopped = new Promise((r) => (t.recorder.onstop = r))
+  t.recorder.stop()
+  await stopped
+  $('advance').classList.add('hidden')
+  $('restart').classList.add('hidden')
+  $('rec').classList.remove('hidden')
+  lockTabs(false)
+  return t
+}
+
+async function finish(total) {
+  const t = await stopTake()
+  const blob = new Blob(t.chunks, { type: 'audio/webm' })
+  const marks = { starts: t.starts, total: +total.toFixed(2) }
+  $('rec-status').textContent = 'Saving…'
+  const a = await fetch(`/save?part=${part}&kind=audio`, { method: 'POST', body: blob })
+  const m = await fetch(`/save?part=${part}&kind=marks`, { method: 'POST', body: JSON.stringify(marks) })
+  $('rec-status').textContent = a.ok && m.ok ? '' : 'Save failed, please try again'
+  $('rec').textContent = '● Record again'
+  showResult(marks, URL.createObjectURL(blob))
+  updateSaved()
+}
+
+function showResult(marks, src) {
+  $('playback').src = src
+  $('rows').replaceChildren(...sections.map((s, i) => {
+    const took = (marks.starts[i + 1] ?? marks.total) - (marks.starts[i] ?? marks.total)
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td></td><td class="num">${marks.starts[i] === undefined ? '–' : fmt(took)}</td><td class="num">${fmt(aimFor(s.text))}</td>`
+    tr.firstChild.textContent = s.screen
+    return tr
+  }))
+  const total = document.createElement('tr')
+  total.innerHTML = `<th>Total</th><th class="num">${fmt(marks.total)}</th><th class="num">${fmt(sections.reduce((a, s) => a + aimFor(s.text), 0))}</th>`
+  $('rows').appendChild(total)
+  $('result').classList.remove('hidden')
+}
+
+$('rec').onclick = start
+$('advance').onclick = advance
+$('restart').onclick = async () => {
+  await stopTake()
+  $('rec-status').textContent = 'Discarded. Start again when ready.'
+  showSection(0)
+}
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && take) {
+    e.preventDefault()
+    advance()
+  }
+})
+$('tab-part1').onclick = () => load('part1')
+$('tab-part2').onclick = () => load('part2')
+
+;(async () => {
+  script = await (await fetch('/script.json')).json()
+  await load('part1')
+  requestAnimationFrame(tick)
+})()
+</script>
+</body>
+</html>

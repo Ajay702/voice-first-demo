@@ -1,0 +1,13 @@
+{
+  "name": "voice-first-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "python3 voiceover_server.py",
+    "record": "node record.mjs all",
+    "merge": "sh merge.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1"
+  }
+}

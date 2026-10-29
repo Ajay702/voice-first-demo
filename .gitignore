@@ -1,0 +1,6 @@
+node_modules
+__pycache__/
+# Your recordings and rendered videos stay on your machine
+voice/
+out/
+final/
